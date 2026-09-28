@@ -14,6 +14,8 @@ public class Config {
     public boolean onlyBedrock = false;
     /** 0 = horizontal 1x2, 1 = vertical 1x2, 2 = both */
     public int mode = 0;
+    /** 0 = any (air or breakable blocks inside), 1 = air only, 2 = filled only */
+    public int cellMode = 0;
     public int radius = 96;
     public int maxHoles = 20;
     public int minY = -64;
