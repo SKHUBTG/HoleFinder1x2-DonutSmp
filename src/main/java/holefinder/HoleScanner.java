@@ -10,9 +10,15 @@ import net.minecraft.world.level.block.state.BlockState;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Purely passive: reads blocks of chunks the server already sent. No packets. */
+/**
+ * Purely passive: reads blocks of chunks the server already sent. No packets.
+ *
+ * Finds 1x2 pockets whose two inner cells are NOT bedrock (air or any breakable block)
+ * and whose 10 surrounding blocks are ALL bedrock. So if the cells are filled with stone,
+ * you can mine them out and get a pure bedrock 1x2 box.
+ */
 public class HoleScanner {
-    public record Hole(BlockPos a, BlockPos b) {
+    public record Hole(BlockPos a, BlockPos b, boolean filled) {
         double dist2(double x, double y, double z) {
             double cx = (a.getX() + b.getX()) / 2.0 + 0.5;
             double cy = (a.getY() + b.getY()) / 2.0 + 0.5;
@@ -91,18 +97,25 @@ public class HoleScanner {
             for (int z = sz; z < sz + 16; z++) {
                 for (int y = y0; y <= y1; y++) {
                     m.set(x, y, z);
-                    if (!w.getBlockState(m).isAir()) continue;
+                    if (!cellOk(w.getBlockState(m), c)) continue;
                     BlockPos p = m.immutable();
                     if (c.mode != 1) {
-                        check(w, p, p.east(), c, found);
-                        check(w, p, p.south(), c, found);
+                        check(w, p, Direction.EAST, c, found);
+                        check(w, p, Direction.SOUTH, c, found);
                     }
-                    if (c.mode != 0) check(w, p, p.above(), c, found);
+                    if (c.mode != 0) check(w, p, Direction.UP, c, found);
                 }
             }
         }
         if (found.isEmpty()) results.remove(key);
         else results.put(key, found);
+    }
+
+    /** Can this block be an inner cell of the pocket? */
+    private static boolean cellOk(BlockState s, Config c) {
+        if (s.is(Blocks.BEDROCK)) return false;
+        if (c.cellMode == 1) return s.isAir();
+        return true;
     }
 
     private static BlockState state(ClientLevel w, BlockPos p) {
@@ -111,18 +124,32 @@ public class HoleScanner {
         return w.getBlockState(p);
     }
 
-    private static void check(ClientLevel w, BlockPos a, BlockPos b, Config c, List<Hole> out) {
-        BlockState sb = state(w, b);
-        if (sb == null || !sb.isAir()) return;
-        for (BlockPos cell : new BlockPos[]{a, b}) {
-            for (Direction d : Direction.values()) {
-                BlockPos n = cell.relative(d);
-                if (n.equals(a) || n.equals(b)) continue;
-                BlockState s = state(w, n);
-                if (s == null || s.isAir() || !s.getFluidState().isEmpty()) return;
-                if (c.onlyBedrock && !s.is(Blocks.BEDROCK)) return;
+    private static boolean wallsOk(ClientLevel w, BlockPos cell, Direction skip, Config c) {
+        boolean bedrockOnly = c.cellMode != 1 || c.onlyBedrock;
+        for (Direction d : Direction.values()) {
+            if (d == skip) continue;
+            BlockState s = state(w, cell.relative(d));
+            if (s == null) return false;
+            if (bedrockOnly) {
+                if (!s.is(Blocks.BEDROCK)) return false;
+            } else if (s.isAir() || !s.getFluidState().isEmpty()) {
+                return false;
             }
         }
-        out.add(new Hole(a, b));
+        return true;
+    }
+
+    private static void check(ClientLevel w, BlockPos a, Direction dir, Config c, List<Hole> out) {
+        BlockState sa = state(w, a);
+        if (sa == null) return;
+        // cheap early exit: a's other 5 neighbours first
+        if (!wallsOk(w, a, dir, c)) return;
+        BlockPos b = a.relative(dir);
+        BlockState sb = state(w, b);
+        if (sb == null || !cellOk(sb, c)) return;
+        if (!wallsOk(w, b, dir.getOpposite(), c)) return;
+        boolean filled = !sa.isAir() || !sb.isAir();
+        if (c.cellMode == 2 && !filled) return;
+        out.add(new Hole(a, b, filled));
     }
 }
