@@ -68,7 +68,9 @@ public class HoleRenderer {
             float x1 = Math.max(h.a().getX(), h.b().getX()) + 1 + e;
             float y1 = Math.max(h.a().getY(), h.b().getY()) + 1 + e;
             float z1 = Math.max(h.a().getZ(), h.b().getZ()) + 1 + e;
-            filledBox(mat, buffer, x0, y0, z0, x1, y1, z1, r, g, b, a);
+            // filled (breakable) pockets get channel-rotated colour so you can tell them apart
+            if (h.filled()) filledBox(mat, buffer, x0, y0, z0, x1, y1, z1, g, b, r, a);
+            else filledBox(mat, buffer, x0, y0, z0, x1, y1, z1, r, g, b, a);
         }
         matrices.popPose();
 
