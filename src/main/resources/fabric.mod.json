@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "holefinder",
+  "version": "${version}",
+  "name": "Hole Finder",
+  "description": "Highlights enclosed 1x2 pockets. Client-side only, sends no packets.",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["holefinder.HoleFinderClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.18.1",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
