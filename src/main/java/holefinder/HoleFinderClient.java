@@ -11,6 +11,7 @@ import net.minecraft.resources.Identifier;
 
 public class HoleFinderClient implements ClientModInitializer {
     private static KeyMapping openKey;
+    private static KeyMapping macroKey;
 
     @Override
     public void onInitializeClient() {
@@ -20,9 +21,12 @@ public class HoleFinderClient implements ClientModInitializer {
                 Identifier.fromNamespaceAndPath("holefinder", "main"));
         openKey = KeyBindingHelper.registerKeyBinding(new KeyMapping(
                 "key.holefinder.open", InputConstants.Type.KEYSYM, InputConstants.KEY_INSERT, category));
+        macroKey = KeyBindingHelper.registerKeyBinding(new KeyMapping(
+                "key.holefinder.macro", InputConstants.Type.KEYSYM, InputConstants.UNKNOWN.getValue(), category));
 
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
             while (openKey.consumeClick()) mc.setScreen(new HoleScreen());
+            while (macroKey.consumeClick()) MacroRunner.trigger();
             HoleScanner.tick(mc);
         });
 
