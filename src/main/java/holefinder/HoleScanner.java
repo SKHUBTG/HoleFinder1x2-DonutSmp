@@ -99,11 +99,15 @@ public class HoleScanner {
                     m.set(x, y, z);
                     if (!cellOk(w.getBlockState(m), c)) continue;
                     BlockPos p = m.immutable();
-                    if (c.mode != 1) {
-                        check(w, p, Direction.EAST, c, found);
-                        check(w, p, Direction.SOUTH, c, found);
+                    for (int len = 2; len <= 3; len++) {
+                        if (len == 2 && c.length == 1) continue;
+                        if (len == 3 && c.length == 0) continue;
+                        if (c.mode != 1) {
+                            check(w, p, Direction.EAST, len, c, found);
+                            check(w, p, Direction.SOUTH, len, c, found);
+                        }
+                        if (c.mode != 0) check(w, p, Direction.UP, len, c, found);
                     }
-                    if (c.mode != 0) check(w, p, Direction.UP, c, found);
                 }
             }
         }
@@ -124,10 +128,10 @@ public class HoleScanner {
         return w.getBlockState(p);
     }
 
-    private static boolean wallsOk(ClientLevel w, BlockPos cell, Direction skip, Config c) {
+    private static boolean wallsOk(ClientLevel w, BlockPos cell, Direction skipA, Direction skipB, Config c) {
         boolean bedrockOnly = c.cellMode != 1 || c.onlyBedrock;
         for (Direction d : Direction.values()) {
-            if (d == skip) continue;
+            if (d == skipA || d == skipB) continue;
             BlockState s = state(w, cell.relative(d));
             if (s == null) return false;
             if (bedrockOnly) {
@@ -139,17 +143,21 @@ public class HoleScanner {
         return true;
     }
 
-    private static void check(ClientLevel w, BlockPos a, Direction dir, Config c, List<Hole> out) {
-        BlockState sa = state(w, a);
-        if (sa == null) return;
-        // cheap early exit: a's other 5 neighbours first
-        if (!wallsOk(w, a, dir, c)) return;
-        BlockPos b = a.relative(dir);
-        BlockState sb = state(w, b);
-        if (sb == null || !cellOk(sb, c)) return;
-        if (!wallsOk(w, b, dir.getOpposite(), c)) return;
-        boolean filled = !sa.isAir() || !sb.isAir();
+    /** Checks a straight pocket of `len` cells starting at a going in dir. */
+    private static void check(ClientLevel w, BlockPos a, Direction dir, int len, Config c, List<Hole> out) {
+        boolean filled = false;
+        BlockPos last = a;
+        for (int i = 0; i < len; i++) {
+            BlockPos cell = a.relative(dir, i);
+            BlockState s = state(w, cell);
+            if (s == null || !cellOk(s, c)) return;
+            Direction next = i < len - 1 ? dir : null;
+            Direction prev = i > 0 ? dir.getOpposite() : null;
+            if (!wallsOk(w, cell, next, prev, c)) return;
+            if (!s.isAir()) filled = true;
+            last = cell;
+        }
         if (c.cellMode == 2 && !filled) return;
-        out.add(new Hole(a, b, filled));
+        out.add(new Hole(a, last, filled));
     }
 }
