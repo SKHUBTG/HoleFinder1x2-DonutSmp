@@ -16,6 +16,8 @@ public class Config {
     public int mode = 0;
     /** 0 = any (air or breakable blocks inside), 1 = air only, 2 = filled only */
     public int cellMode = 0;
+    /** 0 = 1x2, 1 = 1x3, 2 = both */
+    public int length = 0;
     public int radius = 96;
     public int maxHoles = 20;
     public int minY = -64;
