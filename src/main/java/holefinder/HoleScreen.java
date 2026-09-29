@@ -26,6 +26,7 @@ public class HoleScreen extends Screen {
         Config c = Config.I;
         rows.add(new Toggle("Enabled", () -> c.enabled, v -> c.enabled = v));
         rows.add(new Cycle("Mode", new String[]{"Horizontal 1x2", "Vertical 1x2", "Both"}, () -> c.mode, v -> c.mode = v));
+        rows.add(new Cycle("Length", new String[]{"1x2", "1x3", "1x2 + 1x3"}, () -> c.length, v -> c.length = v));
         rows.add(new Cycle("Pockets", new String[]{"Air + breakable", "Air only", "Filled only"}, () -> c.cellMode, v -> c.cellMode = v));
         rows.add(new Toggle("Bedrock walls (air only)", () -> c.onlyBedrock, v -> c.onlyBedrock = v));
         rows.add(new Slider("Radius", 16, 256, () -> c.radius, v -> c.radius = v));
