@@ -15,16 +15,17 @@ public class Config {
     // ---- Hole finder ----
     public boolean enabled = true;
     public boolean onlyBedrock = false;
-    public int mode = 0;       // 0 horizontal, 1 vertical, 2 both
+    public int mode = 0;       // 0 horizontal, 1 vertical, 2 both (ignored for L-shape)
     public int cellMode = 0;   // 0 air+breakable, 1 air only, 2 filled only
-    public int length = 0;     // 0 = 1x2, 1 = 1x3, 2 = both
+    public int shape = 0;      // 0 = 1x2, 1 = 1x3, 2 = 1x2+1x3, 3 = L-shape (3 vertical + 1 side, for spawner+enderchest)
     public int radius = 96;
     public int maxHoles = 20;
     public int minY = -64;
     public int maxY = -50;
     public int chunksPerTick = 4;
     public int rescanTicks = 60;
-    public int r = 255, g = 60, b = 60, alpha = 110;
+    public int r = 90, g = 170, b = 255, alpha = 110;
+    public int theme = 0; // index into HoleScreen presets, 0 = custom (uses r/g/b above)
 
     // ---- Macro / auto-tp ----
     public boolean macroEnabled = false;
