@@ -62,15 +62,17 @@ public class HoleRenderer {
         float e = 0.002f;
         Matrix4fc mat = matrices.last().pose();
         for (HoleScanner.Hole h : holes) {
-            float x0 = Math.min(h.a().getX(), h.b().getX()) - e;
-            float y0 = Math.min(h.a().getY(), h.b().getY()) - e;
-            float z0 = Math.min(h.a().getZ(), h.b().getZ()) - e;
-            float x1 = Math.max(h.a().getX(), h.b().getX()) + 1 + e;
-            float y1 = Math.max(h.a().getY(), h.b().getY()) + 1 + e;
-            float z1 = Math.max(h.a().getZ(), h.b().getZ()) + 1 + e;
-            // filled (breakable) pockets get channel-rotated colour so you can tell them apart
-            if (h.filled()) filledBox(mat, buffer, x0, y0, z0, x1, y1, z1, g, b, r, a);
-            else filledBox(mat, buffer, x0, y0, z0, x1, y1, z1, r, g, b, a);
+            for (var pos : h.cells()) {
+                float x0 = pos.getX() - e;
+                float y0 = pos.getY() - e;
+                float z0 = pos.getZ() - e;
+                float x1 = pos.getX() + 1 + e;
+                float y1 = pos.getY() + 1 + e;
+                float z1 = pos.getZ() + 1 + e;
+                // filled (breakable) pockets get channel-rotated colour so you can tell them apart
+                if (h.filled()) filledBox(mat, buffer, x0, y0, z0, x1, y1, z1, g, b, r, a);
+                else filledBox(mat, buffer, x0, y0, z0, x1, y1, z1, r, g, b, a);
+            }
         }
         matrices.popPose();
 
