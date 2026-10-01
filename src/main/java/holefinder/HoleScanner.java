@@ -13,16 +13,26 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Purely passive: reads blocks of chunks the server already sent. No packets.
  *
- * Finds 1x2 pockets whose two inner cells are NOT bedrock (air or any breakable block)
- * and whose 10 surrounding blocks are ALL bedrock. So if the cells are filled with stone,
- * you can mine them out and get a pure bedrock 1x2 box.
+ * A "pocket" is a connected set of non-bedrock cells (air or breakable blocks)
+ * whose every other neighbour is bedrock. Modes:
+ *  - straight 1x2 / 1x3 (horizontal or vertical), same as before
+ *  - L-shape: a vertical column of 3 cells (stand / mob / storage) plus one
+ *    extra cell branching sideways off the TOP cell, for the storage block's
+ *    door to be able to open once mined out.
  */
 public class HoleScanner {
-    public record Hole(BlockPos a, BlockPos b, boolean filled) {
+    public record Hole(List<BlockPos> cells, boolean filled) {
         double dist2(double x, double y, double z) {
-            double cx = (a.getX() + b.getX()) / 2.0 + 0.5;
-            double cy = (a.getY() + b.getY()) / 2.0 + 0.5;
-            double cz = (a.getZ() + b.getZ()) / 2.0 + 0.5;
+            double cx = 0, cy = 0, cz = 0;
+            for (BlockPos p : cells) {
+                cx += p.getX();
+                cy += p.getY();
+                cz += p.getZ();
+            }
+            int n = cells.size();
+            cx = cx / n + 0.5;
+            cy = cy / n + 0.5;
+            cz = cz / n + 0.5;
             return (cx - x) * (cx - x) + (cy - y) * (cy - y) + (cz - z) * (cz - z);
         }
     }
@@ -97,16 +107,20 @@ public class HoleScanner {
             for (int z = sz; z < sz + 16; z++) {
                 for (int y = y0; y <= y1; y++) {
                     m.set(x, y, z);
-                    if (!cellOk(w.getBlockState(m), c)) continue;
                     BlockPos p = m.immutable();
-                    for (int len = 2; len <= 3; len++) {
-                        if (len == 2 && c.length == 1) continue;
-                        if (len == 3 && c.length == 0) continue;
+                    if (c.shape == 3) {
+                        checkL(w, p, c, found);
+                        continue;
+                    }
+                    if (!cellOk(w.getBlockState(m), c)) continue;
+                    int minLen = c.shape == 1 ? 3 : 2;
+                    int maxLen = c.shape == 0 ? 2 : 3;
+                    for (int len = minLen; len <= maxLen; len++) {
                         if (c.mode != 1) {
-                            check(w, p, Direction.EAST, len, c, found);
-                            check(w, p, Direction.SOUTH, len, c, found);
+                            checkStraight(w, p, Direction.EAST, len, c, found);
+                            checkStraight(w, p, Direction.SOUTH, len, c, found);
                         }
-                        if (c.mode != 0) check(w, p, Direction.UP, len, c, found);
+                        if (c.mode != 0) checkStraight(w, p, Direction.UP, len, c, found);
                     }
                 }
             }
@@ -115,7 +129,7 @@ public class HoleScanner {
         else results.put(key, found);
     }
 
-    /** Can this block be an inner cell of the pocket? */
+    /** Can this block be part of a pocket? */
     private static boolean cellOk(BlockState s, Config c) {
         if (s.is(Blocks.BEDROCK)) return false;
         if (c.cellMode == 1) return s.isAir();
@@ -128,11 +142,17 @@ public class HoleScanner {
         return w.getBlockState(p);
     }
 
-    private static boolean wallsOk(ClientLevel w, BlockPos cell, Direction skipA, Direction skipB, Config c) {
-        boolean bedrockOnly = c.cellMode != 1 || c.onlyBedrock;
+    private static boolean bedrockOnlyRule(Config c) {
+        return c.cellMode != 1 || c.onlyBedrock;
+    }
+
+    /** All neighbours of `cell` except the other pocket cells must be bedrock (or non-air if that rule is off). */
+    private static boolean wallsOk(ClientLevel w, BlockPos cell, Set<BlockPos> internal, Config c) {
+        boolean bedrockOnly = bedrockOnlyRule(c);
         for (Direction d : Direction.values()) {
-            if (d == skipA || d == skipB) continue;
-            BlockState s = state(w, cell.relative(d));
+            BlockPos n = cell.relative(d);
+            if (internal.contains(n)) continue;
+            BlockState s = state(w, n);
             if (s == null) return false;
             if (bedrockOnly) {
                 if (!s.is(Blocks.BEDROCK)) return false;
@@ -143,21 +163,49 @@ public class HoleScanner {
         return true;
     }
 
-    /** Checks a straight pocket of `len` cells starting at a going in dir. */
-    private static void check(ClientLevel w, BlockPos a, Direction dir, int len, Config c, List<Hole> out) {
+    private static void checkStraight(ClientLevel w, BlockPos a, Direction dir, int len, Config c, List<Hole> out) {
+        List<BlockPos> cells = new ArrayList<>();
         boolean filled = false;
-        BlockPos last = a;
         for (int i = 0; i < len; i++) {
             BlockPos cell = a.relative(dir, i);
             BlockState s = state(w, cell);
             if (s == null || !cellOk(s, c)) return;
-            Direction next = i < len - 1 ? dir : null;
-            Direction prev = i > 0 ? dir.getOpposite() : null;
-            if (!wallsOk(w, cell, next, prev, c)) return;
             if (!s.isAir()) filled = true;
-            last = cell;
+            cells.add(cell);
         }
+        Set<BlockPos> set = new HashSet<>(cells);
+        for (BlockPos cell : cells) if (!wallsOk(w, cell, set, c)) return;
         if (c.cellMode == 2 && !filled) return;
-        out.add(new Hole(a, last, filled));
+        out.add(new Hole(cells, filled));
+    }
+
+    /**
+     * Vertical column of 3 (base a, a.up, a.up.up) plus one extra cell branching
+     * horizontally off the TOP cell, in any of the 4 horizontal directions.
+     */
+    private static void checkL(ClientLevel w, BlockPos a, Config c, List<Hole> out) {
+        BlockPos p0 = a, p1 = a.above(), p2 = a.above(2);
+        BlockState s0 = state(w, p0), s1 = state(w, p1), s2 = state(w, p2);
+        if (s0 == null || s1 == null || s2 == null) return;
+        if (!cellOk(s0, c) || !cellOk(s1, c) || !cellOk(s2, c)) return;
+        for (Direction hd : Direction.Plane.HORIZONTAL) {
+            BlockPos p3 = p2.relative(hd);
+            BlockState s3 = state(w, p3);
+            if (s3 == null || !cellOk(s3, c)) continue;
+            List<BlockPos> cells = List.of(p0, p1, p2, p3);
+            Set<BlockPos> set = new HashSet<>(cells);
+            boolean ok = true;
+            for (BlockPos cell : cells) {
+                if (!wallsOk(w, cell, set, c)) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (!ok) continue;
+            boolean filled = !s0.isAir() || !s1.isAir() || !s2.isAir() || !s3.isAir();
+            if (c.cellMode == 2 && !filled) continue;
+            out.add(new Hole(cells, filled));
+            return;
+        }
     }
 }
