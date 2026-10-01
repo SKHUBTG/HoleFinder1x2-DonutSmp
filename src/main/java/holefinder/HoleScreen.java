@@ -15,13 +15,26 @@ import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
 
+/** Black "liquid glass" GUI: two tabs, sliding indicator, scale-in open animation. */
 public class HoleScreen extends Screen {
-    private static final int PW = 300, ROW_H = 22, GAP = 4, PAD = 12, TITLE_H = 56;
-    private static final int KEY_INSERT = 260; // GLFW_KEY_INSERT
+    private static final int PW = 320, ROW_H = 22, GAP = 5, PAD = 14, TITLE_H = 60;
+    private static final int KEY_INSERT = 260;
+
+    // preset accent themes: name, r, g, b
+    static final Object[][] THEMES = {
+            {"Custom", -1, -1, -1},
+            {"Azure", 90, 170, 255},
+            {"Crimson", 255, 70, 90},
+            {"Emerald", 80, 230, 150},
+            {"Violet", 170, 110, 255},
+            {"Amber", 255, 180, 70}
+    };
 
     private final List<Row> holeRows = new ArrayList<>();
     private final List<Row> macroRows = new ArrayList<>();
-    private int tab = 0; // 0 = hole finder, 1 = auto-tp
+    private int tab = 0;
+    private float tabAnim = 0f; // 0..1, animates the sliding tab indicator
+    private float openAnim = 0f; // 0..1 scale-in on open
     private Row active;
     private EditBox commandBox;
 
@@ -34,8 +47,9 @@ public class HoleScreen extends Screen {
     private void buildHoleRows() {
         Config c = Config.I;
         holeRows.add(new Toggle("Enabled", () -> c.enabled, v -> c.enabled = v));
+        holeRows.add(new Cycle("Theme", themeNames(), () -> c.theme, this::applyTheme));
+        holeRows.add(new Cycle("Shape", new String[]{"1x2", "1x3", "1x2 + 1x3", "L-shape (spawner + chest)"}, () -> c.shape, v -> c.shape = v));
         holeRows.add(new Cycle("Direction", new String[]{"Horizontal", "Vertical", "Both"}, () -> c.mode, v -> c.mode = v));
-        holeRows.add(new Cycle("Length", new String[]{"1x2", "1x3", "1x2 + 1x3"}, () -> c.length, v -> c.length = v));
         holeRows.add(new Cycle("Pockets", new String[]{"Air + breakable", "Air only", "Filled only"}, () -> c.cellMode, v -> c.cellMode = v));
         holeRows.add(new Toggle("Bedrock walls (air only)", () -> c.onlyBedrock, v -> c.onlyBedrock = v));
         holeRows.add(new Slider("Radius", 16, 256, () -> c.radius, v -> c.radius = v));
@@ -43,10 +57,26 @@ public class HoleScreen extends Screen {
         holeRows.add(new Slider("Min Y", -64, 320, () -> c.minY, v -> c.minY = v));
         holeRows.add(new Slider("Max Y", -64, 320, () -> c.maxY, v -> c.maxY = v));
         holeRows.add(new Slider("Scan speed", 1, 16, () -> c.chunksPerTick, v -> c.chunksPerTick = v));
-        holeRows.add(new Slider("Red", 0, 255, () -> c.r, v -> c.r = v));
-        holeRows.add(new Slider("Green", 0, 255, () -> c.g, v -> c.g = v));
-        holeRows.add(new Slider("Blue", 0, 255, () -> c.b, v -> c.b = v));
+        holeRows.add(new Slider("Red", 0, 255, () -> c.r, v -> { c.r = v; c.theme = 0; }));
+        holeRows.add(new Slider("Green", 0, 255, () -> c.g, v -> { c.g = v; c.theme = 0; }));
+        holeRows.add(new Slider("Blue", 0, 255, () -> c.b, v -> { c.b = v; c.theme = 0; }));
         holeRows.add(new Slider("Opacity", 20, 255, () -> c.alpha, v -> c.alpha = v));
+    }
+
+    private String[] themeNames() {
+        String[] out = new String[THEMES.length];
+        for (int i = 0; i < THEMES.length; i++) out[i] = (String) THEMES[i][0];
+        return out;
+    }
+
+    private void applyTheme(int idx) {
+        Config c = Config.I;
+        c.theme = idx;
+        if (idx != 0) {
+            c.r = (int) THEMES[idx][1];
+            c.g = (int) THEMES[idx][2];
+            c.b = (int) THEMES[idx][3];
+        }
     }
 
     private void buildMacroRows() {
@@ -74,6 +104,7 @@ public class HoleScreen extends Screen {
         commandBox.setMaxLength(200);
         commandBox.setValue(c.macroCommand);
         commandBox.setResponder(v -> c.macroCommand = v);
+        commandBox.setTextColor(0xFFE8E8F0);
         addRenderableWidget(commandBox);
     }
 
@@ -91,26 +122,52 @@ public class HoleScreen extends Screen {
         return tab == 0 ? holeRows : macroRows;
     }
 
+    private int panelHeight() {
+        List<Row> rows = rows();
+        int extra = tab == 1 ? 24 : 0;
+        return TITLE_H + rows.size() * (ROW_H + GAP) + extra + PAD;
+    }
+
+    private int topY() {
+        return Math.max(4, (height - panelHeight()) / 2);
+    }
+
     @Override
     public void render(GuiGraphics g, int mx, int my, float delta) {
         Config c = Config.I;
-        List<Row> rows = rows();
-        boolean showCommandBox = tab == 1;
-        int extra = showCommandBox ? 24 : 0;
-        int ph = TITLE_H + rows.size() * (ROW_H + GAP) + extra + PAD;
+        openAnim = Math.min(1f, openAnim + delta * 0.18f);
+        float target = tab;
+        tabAnim += (target - tabAnim) * Math.min(1f, delta * 0.35f);
+
+        int ph = panelHeight();
         int px = (width - PW) / 2;
-        int py = Math.max(4, (height - ph) / 2);
+        int py = topY();
 
-        rounded(g, px, py, PW, ph, 10, 0xE6121218);
-        g.drawString(font, "Hole Finder", px + PAD, py + 12, 0xFFFFFFFF);
-        rounded(g, px + PW - PAD - 30, py + 8, 30, 16, 6, 0xFF000000 | (c.r << 16) | (c.g << 8) | c.b);
+        // backdrop dim
+        g.fill(0, 0, width, height, 0x50000000);
 
-        // tabs
-        int tabY = py + 28, tabH = 20, tabW = (PW - PAD * 2 - GAP) / 2;
-        drawTab(g, px + PAD, tabY, tabW, tabH, "Finder", tab == 0, mx, my);
-        drawTab(g, px + PAD + tabW + GAP, tabY, tabW, tabH, "Auto-TP", tab == 1, mx, my);
+        float ease = 1f - (1f - openAnim) * (1f - openAnim);
+        int animPh = Math.max(1, (int) (ph * ease));
+        int animPy = py + (ph - animPh) / 2;
+
+        rounded(g, px, animPy, PW, animPh, 16, 0xD40A0A0E);
+        rounded(g, px, animPy, PW, animPh, 16, 0x14FFFFFF); // faint glass highlight overlay
+        if (ease < 0.98f) return; // skip inner content during the pop-in
+
+        g.drawString(font, "HOLE FINDER", px + PAD, py + 14, 0xFFF2F2F8);
+        int accentCol = accentColor();
+        rounded(g, px + PW - PAD - 26, py + 10, 26, 14, 6, accentCol);
+
+        int tabY = py + 30, tabH = 20, tabW = (PW - PAD * 2 - GAP) / 2;
+        rounded(g, px + PAD, tabY, PW - PAD * 2, tabH, 8, 0xFF161619);
+        int indX = px + PAD + (int) (tabAnim * (tabW + GAP));
+        rounded(g, indX, tabY, tabW, tabH, 7, accentCol);
+        drawTabLabel(g, px + PAD, tabY, tabW, tabH, "FINDER", tab == 0);
+        drawTabLabel(g, px + PAD + tabW + GAP, tabY, tabW, tabH, "AUTO-TP", tab == 1);
 
         int y = py + TITLE_H;
+        boolean showCommandBox = tab == 1;
+        commandBox.visible = showCommandBox;
         if (showCommandBox) {
             commandBox.setX(px + PAD);
             commandBox.setY(y + 2);
@@ -118,33 +175,27 @@ public class HoleScreen extends Screen {
             commandBox.render(g, mx, my, delta);
             y += 24;
         }
-        commandBox.visible = showCommandBox;
 
-        for (Row r : rows) {
+        for (Row r : rows()) {
             r.x = px + PAD;
             r.y = y;
             r.w = PW - PAD * 2;
-            r.draw(g, font, mx, my);
+            r.draw(g, font, mx, my, accentCol);
             y += ROW_H + GAP;
         }
 
         if (tab == 1) {
             String cd = MacroRunner.remainingCooldown();
-            String status = cd == null ? "Ready" : "Cooldown: " + cd + "s";
-            g.drawString(font, status, px + PAD, py + ph - 10, cd == null ? 0xFF7CFC7C : 0xFFFF8C69);
+            String status = cd == null ? "READY" : "COOLDOWN " + cd + "s";
+            g.drawString(font, status, px + PAD, py + ph - 11, cd == null ? 0xFF7CFC7C : 0xFFFF8C69);
         }
     }
 
-    private void drawTab(GuiGraphics g, int x, int y, int w, int h, String label, boolean sel, int mx, int my) {
-        boolean hover = mx >= x && mx <= x + w && my >= y && my <= y + h;
-        rounded(g, x, y, w, h, 6, sel ? accentColor() : (hover ? 0xFF2E2E3A : 0xFF23232D));
+    private void drawTabLabel(GuiGraphics g, int x, int y, int w, int h, String label, boolean sel) {
         int tw = font.width(label);
-        g.drawString(font, label, x + (w - tw) / 2, y + 6, sel ? 0xFF101014 : 0xFFDDDDE5);
-        lastTabX1 = x;
-        lastTabX2 = x + w;
+        g.drawString(font, label, x + (w - tw) / 2, y + 6, sel ? 0xFF0A0A0E : 0xFFAAAAB8);
     }
 
-    private int lastTabX1, lastTabX2;
     private int accentColor() {
         Config c = Config.I;
         return 0xFF000000 | (c.r << 16) | (c.g << 8) | c.b;
@@ -152,9 +203,8 @@ public class HoleScreen extends Screen {
 
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
-        Config c = Config.I;
         int px = (width - PW) / 2;
-        int tabY = topY() + 28, tabH = 20, tabW = (PW - PAD * 2 - GAP) / 2;
+        int tabY = topY() + 30, tabH = 20, tabW = (PW - PAD * 2 - GAP) / 2;
         if (event.y() >= tabY && event.y() <= tabY + tabH) {
             if (event.x() >= px + PAD && event.x() <= px + PAD + tabW) { tab = 0; return true; }
             if (event.x() >= px + PAD + tabW + GAP && event.x() <= px + PAD + tabW + GAP + tabW) { tab = 1; return true; }
@@ -170,14 +220,6 @@ public class HoleScreen extends Screen {
             }
         }
         return super.mouseClicked(event, doubled);
-    }
-
-    private int topY() {
-        List<Row> rows = rows();
-        boolean showCommandBox = tab == 1;
-        int extra = showCommandBox ? 24 : 0;
-        int ph = TITLE_H + rows.size() * (ROW_H + GAP) + extra + PAD;
-        return Math.max(4, (height - ph) / 2);
     }
 
     @Override
@@ -212,6 +254,7 @@ public class HoleScreen extends Screen {
     }
 
     static void rounded(GuiGraphics g, int x, int y, int w, int h, int r, int color) {
+        if (w <= 0 || h <= 0) return;
         r = Math.min(r, Math.min(w, h) / 2);
         for (int i = 0; i < h; i++) {
             int inset = 0;
@@ -237,15 +280,10 @@ public class HoleScreen extends Screen {
         void drag(double mx) {
         }
 
-        abstract void draw(GuiGraphics g, Font f, int mx, int my);
+        abstract void draw(GuiGraphics g, Font f, int mx, int my, int accent);
 
         void base(GuiGraphics g, int mx, int my) {
-            rounded(g, x, y, w, ROW_H, 7, hit(mx, my) ? 0xFF2E2E3A : 0xFF23232D);
-        }
-
-        int accent() {
-            Config c = Config.I;
-            return 0xFF000000 | (c.r << 16) | (c.g << 8) | c.b;
+            rounded(g, x, y, w, ROW_H, 8, hit(mx, my) ? 0xFF201F26 : 0xFF15151A);
         }
     }
 
@@ -262,8 +300,8 @@ public class HoleScreen extends Screen {
         }
 
         @Override
-        void draw(GuiGraphics g, Font f, int mx, int my) {
-            g.drawString(f, text, x + 2, y + 7, 0xFF9A9AA8);
+        void draw(GuiGraphics g, Font f, int mx, int my, int accent) {
+            g.drawString(f, text, x + 2, y + 7, 0xFF8A8A98);
         }
     }
 
@@ -284,12 +322,12 @@ public class HoleScreen extends Screen {
         }
 
         @Override
-        void draw(GuiGraphics g, Font f, int mx, int my) {
+        void draw(GuiGraphics g, Font f, int mx, int my, int accent) {
             base(g, mx, my);
-            g.drawString(f, label, x + 8, y + 7, 0xFFE8E8F0);
+            g.drawString(f, label, x + 9, y + 7, 0xFFE8E8F0);
             boolean on = get.getAsBoolean();
             int sx = x + w - 34, sy = y + 5;
-            rounded(g, sx, sy, 26, 12, 6, on ? accent() : 0xFF3A3A48);
+            rounded(g, sx, sy, 26, 12, 6, on ? accent : 0xFF33333C);
             rounded(g, on ? sx + 15 : sx + 1, sy + 1, 10, 10, 5, 0xFFFFFFFF);
         }
     }
@@ -313,12 +351,12 @@ public class HoleScreen extends Screen {
         }
 
         @Override
-        void draw(GuiGraphics g, Font f, int mx, int my) {
+        void draw(GuiGraphics g, Font f, int mx, int my, int accent) {
             base(g, mx, my);
-            g.drawString(f, label, x + 8, y + 7, 0xFFE8E8F0);
+            g.drawString(f, label, x + 9, y + 7, 0xFFE8E8F0);
             int i = Math.max(0, Math.min(options.length - 1, get.getAsInt()));
             String v = options[i];
-            g.drawString(f, v, x + w - 8 - f.width(v), y + 7, accent());
+            g.drawString(f, v, x + w - 8 - f.width(v), y + 7, accent);
         }
     }
 
@@ -348,12 +386,12 @@ public class HoleScreen extends Screen {
         }
 
         @Override
-        void draw(GuiGraphics g, Font f, int mx, int my) {
+        void draw(GuiGraphics g, Font f, int mx, int my, int accent) {
             base(g, mx, my);
             double t = (get.getAsInt() - min) / (double) (max - min);
             int fw = Math.max(ROW_H / 2, (int) (w * t));
-            rounded(g, x, y, fw, ROW_H, 7, (accent() & 0x00FFFFFF) | 0x66000000);
-            g.drawString(f, label, x + 8, y + 7, 0xFFE8E8F0);
+            rounded(g, x, y, fw, ROW_H, 8, (accent & 0x00FFFFFF) | 0x55000000);
+            g.drawString(f, label, x + 9, y + 7, 0xFFE8E8F0);
             String v = String.valueOf(get.getAsInt());
             g.drawString(f, v, x + w - 8 - f.width(v), y + 7, 0xFFFFFFFF);
         }
