@@ -108,11 +108,13 @@ public class HoleScanner {
                 for (int y = y0; y <= y1; y++) {
                     m.set(x, y, z);
                     BlockPos p = m.immutable();
+                    if (!cellOk(w.getBlockState(m), c)) continue;
                     if (c.shape == 3) {
-                        checkL(w, p, c, found);
+                        // vertical column of 3 (stand / mob / storage) plus one cell branching
+                        // sideways off EITHER end, so a chest/ender chest lid has room to open.
+                        checkLShape(w, p, c, found);
                         continue;
                     }
-                    if (!cellOk(w.getBlockState(m), c)) continue;
                     int minLen = c.shape == 1 ? 3 : 2;
                     int maxLen = c.shape == 0 ? 2 : 3;
                     for (int len = minLen; len <= maxLen; len++) {
@@ -180,32 +182,39 @@ public class HoleScanner {
     }
 
     /**
-     * Vertical column of 3 (base a, a.up, a.up.up) plus one extra cell branching
-     * horizontally off the TOP cell, in any of the 4 horizontal directions.
+     * Vertical column of 3 cells (base, base+1, base+2) plus one extra cell
+     * branching horizontally off EITHER end of the column (not just the top),
+     * so a chest/ender chest placed at either end still has room for its lid
+     * to swing open once the pocket is mined out.
      */
-    private static void checkL(ClientLevel w, BlockPos a, Config c, List<Hole> out) {
-        BlockPos p0 = a, p1 = a.above(), p2 = a.above(2);
+    private static void checkLShape(ClientLevel w, BlockPos base, Config c, List<Hole> out) {
+        BlockPos p0 = base, p1 = base.above(), p2 = base.above(2);
         BlockState s0 = state(w, p0), s1 = state(w, p1), s2 = state(w, p2);
         if (s0 == null || s1 == null || s2 == null) return;
         if (!cellOk(s0, c) || !cellOk(s1, c) || !cellOk(s2, c)) return;
-        for (Direction hd : Direction.Plane.HORIZONTAL) {
-            BlockPos p3 = p2.relative(hd);
-            BlockState s3 = state(w, p3);
-            if (s3 == null || !cellOk(s3, c)) continue;
-            List<BlockPos> cells = List.of(p0, p1, p2, p3);
-            Set<BlockPos> set = new HashSet<>(cells);
-            boolean ok = true;
-            for (BlockPos cell : cells) {
-                if (!wallsOk(w, cell, set, c)) {
-                    ok = false;
-                    break;
+
+        BlockPos[] ends = {p0, p2};
+        for (BlockPos end : ends) {
+            for (Direction hd : Direction.Plane.HORIZONTAL) {
+                BlockPos p3 = end.relative(hd);
+                BlockState s3 = state(w, p3);
+                if (s3 == null || !cellOk(s3, c)) continue;
+                List<BlockPos> cells = List.of(p0, p1, p2, p3);
+                Set<BlockPos> set = new HashSet<>(cells);
+                boolean ok = true;
+                for (BlockPos cell : cells) {
+                    if (!wallsOk(w, cell, set, c)) {
+                        ok = false;
+                        break;
+                    }
                 }
+                if (!ok) continue;
+                boolean filled = !s0.isAir() || !s1.isAir() || !s2.isAir() || !s3.isAir();
+                if (c.cellMode == 2 && !filled) continue;
+                out.add(new Hole(cells, filled));
+                return;
             }
-            if (!ok) continue;
-            boolean filled = !s0.isAir() || !s1.isAir() || !s2.isAir() || !s3.isAir();
-            if (c.cellMode == 2 && !filled) continue;
-            out.add(new Hole(cells, filled));
-            return;
         }
     }
+
 }
